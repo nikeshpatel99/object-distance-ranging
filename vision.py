@@ -148,7 +148,7 @@ net.setPreferableTarget(cv2.dnn.DNN_TARGET_OPENCL)
 
 ############# dense stero (TODO change to sparse) ###############
 
-# where is the data ? - set this to where you have it
+# data set paths
 
 master_path_to_dataset = "./TTBB-durham-02-10-17-sub10"; # ** need to edit this **
 directory_to_cycle_left = "left-images";     # edit this if needed
@@ -159,7 +159,6 @@ directory_to_cycle_right = "right-images";   # edit this if needed
 
 skip_forward_file_pattern = ""; # set to timestamp to skip forward to
 
-crop_disparity = False; # display full or cropped disparity image
 pause_playback = False; # pause until key press after each image
 
 #####################################################################
@@ -226,9 +225,13 @@ for filename_left in left_file_list:
         # RGB images so load both as such
 
         imgL = cv2.imread(full_path_filename_left, cv2.IMREAD_COLOR)
+        imgL_height_cutoff = (3*np.size(imgL, 0))//4
+        imgL = imgL[0:imgL_height_cutoff][:]
         cv2.imshow('left image',imgL)
 
         imgR = cv2.imread(full_path_filename_right, cv2.IMREAD_COLOR)
+        imgR_height_cutoff = (3*np.size(imgR, 0))//4
+        imgR = imgR[0:imgL_height_cutoff][:]
         cv2.imshow('right image',imgR)
 
         print("-- files loaded successfully");
@@ -266,14 +269,6 @@ for filename_left in left_file_list:
         _, disparity = cv2.threshold(disparity,0, max_disparity * 16, cv2.THRESH_TOZERO);
         disparity_scaled = (disparity / 16.).astype(np.uint8);
 
-        # crop disparity to chop out left part where there are with no disparity
-        # as this area is not seen by both cameras and also
-        # chop out the bottom area (where we see the front of car bonnet)
-
-        if (crop_disparity):
-            width = np.size(disparity_scaled, 1);
-            disparity_scaled = disparity_scaled[0:390,135:width];
-
         # display image (scaling it to the full 0->255 range based on the number
         # of disparities in use for the stereo part)
 
@@ -283,8 +278,6 @@ for filename_left in left_file_list:
 
         windowName = 'YOLOv3 object detection: ' + weights_file
         cv2.namedWindow(windowName, cv2.WINDOW_NORMAL)
-        trackbarName = 'reporting confidence > (x 0.01)'
-        cv2.createTrackbar(trackbarName, windowName , 0, 100, on_trackbar)
 
         # start a timer (to see how long processing and display takes)
         start_t = cv2.getTickCount()
@@ -298,9 +291,8 @@ for filename_left in left_file_list:
         # runs forward inference to get output of the final output layers
         results = net.forward(output_layer_names)
 
-        # remove the bounding boxes with low confidence
-        confThreshold = cv2.getTrackbarPos(trackbarName,windowName) / 100
-        classIDs, confidences, boxes = postprocess(imgL, results, confThreshold, nmsThreshold)
+        # remove the bounding boxes with low confidence using confidence threshold 0.5
+        classIDs, confidences, boxes = postprocess(imgL, results, 0.8, nmsThreshold)
 
         # draw resulting detections on image
         for detected_object in range(0, len(boxes)):
