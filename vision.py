@@ -18,6 +18,24 @@ keep_processing = True
 def on_trackbar(val):
     return
 
+
+
+
+
+
+def getBasicDistance(left, top, right, bottom):
+    left = max(left,0)
+    top = max(top,0)
+    right = max(right,0)
+    bottom = max(bottom,0)
+    camera_focal_length_px = 399.9745178222656  # focal length in pixels
+    stereo_camera_baseline_m = 0.2090607502     # camera baseline in metres
+    bounded_disparity = disparity[left:left+right][top:top+bottom]
+    if np.median(bounded_disparity) <= 0:
+        return -1
+    return (camera_focal_length_px * stereo_camera_baseline_m) / np.median(bounded_disparity)
+
+
 #####################################################################
 # Draw the predicted bounding box on the specified image
 # image: image detection performed on
@@ -26,11 +44,17 @@ def on_trackbar(val):
 # colour: to draw detection rectangle in
 
 def drawPred(image, class_name, confidence, left, top, right, bottom, colour):
+    distance = getBasicDistance(left, top, right, bottom)
+    if distance > 0:
+        distance = getBasicDistance(left, top, right, bottom)
+    else:
+        return
     # Draw a bounding box.
     cv2.rectangle(image, (left, top), (right, bottom), colour, 3)
 
+     
     # construct label
-    label = '%s:%.2f' % (class_name, confidence)
+    label = '%s:%.2fm' % (class_name, distance)
 
     #Display the label at the top of the bounding box
     labelSize, baseLine = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
@@ -245,6 +269,7 @@ for filename_left in left_file_list:
 
         # perform preprocessing - raise to the power, as this subjectively appears
         # to improve subsequent disparity calculation
+        # TODO add other preprocessing: histogram equalisation, noise removal (bilateral filter, cv2 processing etc.)
 
         grayL = np.power(grayL, 0.75).astype('uint8');
         grayR = np.power(grayR, 0.75).astype('uint8');
@@ -266,13 +291,18 @@ for filename_left in left_file_list:
         # so we fix this also using a initial threshold between 0 and max_disparity
         # as disparity=-1 means no disparity available
 
-        _, disparity = cv2.threshold(disparity,0, max_disparity * 16, cv2.THRESH_TOZERO);
-        disparity_scaled = (disparity / 16.).astype(np.uint8);
+        _, disparity_thresholded = cv2.threshold(disparity,0, max_disparity * 16, cv2.THRESH_TOZERO);
+        disparity_scaled = (disparity_thresholded / 16.).astype(np.uint8);
 
         # display image (scaling it to the full 0->255 range based on the number
         # of disparities in use for the stereo part)
 
         cv2.imshow("disparity", (disparity_scaled * (256. / max_disparity)).astype(np.uint8));
+
+        ############################################
+        #           Object Identification          #
+        ############################################
+
 
         # define display window name + trackbar
 
@@ -316,7 +346,6 @@ for filename_left in left_file_list:
 
                 # keyboard input for exit (as standard), save disparity and cropping
         # exit - x
-        # save - s
         # crop - c
         # pause - space
 
