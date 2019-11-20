@@ -21,9 +21,10 @@ def getBasicDistance(left, top, right, bottom):
     bottom = max(bottom,0)
     camera_focal_length_px = 399.9745178222656  # focal length in pixels
     stereo_camera_baseline_m = 0.2090607502     # camera baseline in metres
+    
     print(top, left, bottom, right)
-    bounded_disparity = disparity_scaled[top:bottom][left:right]
-    if np.median(bounded_disparity) <= 0:
+    bounded_disparity = disparity_scaled[top:bottom,left:right]
+    if not (np.median(bounded_disparity) > 0):
         return -1
     print("Normal disparity: ", np.shape(disparity_scaled))
     print("Sliced disparity: ", np.shape(bounded_disparity))
@@ -258,11 +259,11 @@ for filename_left in left_file_list:
         # TODO add other preprocessing: histogram equalisation, noise removal (bilateral filter, cv2 processing etc.)
 
         grayL = np.power(grayL, 0.75).astype('uint8');
-        grayL = cv2.equalizeHist(grayL)
         grayL = cv2.bilateralFilter(grayL,11,50,50)
+        grayL = cv2.equalizeHist(grayL)
         grayR = np.power(grayR, 0.75).astype('uint8');
-        grayR = cv2.equalizeHist(grayR)
         grayR = cv2.bilateralFilter(grayR,11,50,50)
+        grayR = cv2.equalizeHist(grayR)
 
         # compute disparity image from undistorted and rectified stereo images
         # that we have loaded
@@ -296,7 +297,7 @@ for filename_left in left_file_list:
         cv2.imshow("disparity", (disparity_scaled * (256. / max_disparity)).astype(np.uint8));
 
         ############################################
-        #           Object Identification          #
+        #             Object Detection             #
         ############################################
 
 
