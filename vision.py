@@ -5,10 +5,6 @@ import math
 import numpy as np
 import os
 
-
-
-
-
 ########### elements of YOLO object detection - by Toby Breckon ################
 
 keep_processing = True
@@ -18,11 +14,6 @@ keep_processing = True
 def on_trackbar(val):
     return
 
-
-
-
-
-
 def getBasicDistance(left, top, right, bottom):
     left = max(left,0)
     top = max(top,0)
@@ -30,10 +21,14 @@ def getBasicDistance(left, top, right, bottom):
     bottom = max(bottom,0)
     camera_focal_length_px = 399.9745178222656  # focal length in pixels
     stereo_camera_baseline_m = 0.2090607502     # camera baseline in metres
-    bounded_disparity = disparity[left:left+right][top:top+bottom]
+    print(top, left, bottom, right)
+    bounded_disparity = disparity_scaled[top:bottom][left:right]
     if np.median(bounded_disparity) <= 0:
         return -1
+    print("Normal disparity: ", np.shape(disparity_scaled))
+    print("Sliced disparity: ", np.shape(bounded_disparity))
     return (camera_focal_length_px * stereo_camera_baseline_m) / np.median(bounded_disparity)
+
 
 
 #####################################################################
@@ -44,15 +39,13 @@ def getBasicDistance(left, top, right, bottom):
 # colour: to draw detection rectangle in
 
 def drawPred(image, class_name, confidence, left, top, right, bottom, colour):
+    # Get distance value. If the distance isn't useful, do not draw this bounding box.
     distance = getBasicDistance(left, top, right, bottom)
-    if distance > 0:
-        distance = getBasicDistance(left, top, right, bottom)
-    else:
-        return
-    # Draw a bounding box.
+    if distance <= 0: return
+
+    # Draw a bounding box.x
     cv2.rectangle(image, (left, top), (right, bottom), colour, 3)
 
-     
     # construct label
     label = '%s:%.2fm' % (class_name, distance)
 
@@ -163,13 +156,6 @@ net.setPreferableTarget(cv2.dnn.DNN_TARGET_OPENCL)
 
 ############# elements of YOLO object detection - by Toby Breckon ##############
 
-
-
-
-
-
-
-
 ############# dense stero (TODO change to sparse) ###############
 
 # data set paths
@@ -252,7 +238,7 @@ for filename_left in left_file_list:
         imgL_height_cutoff = (3*np.size(imgL, 0))//4
         imgL = imgL[0:imgL_height_cutoff][:]
         cv2.imshow('left image',imgL)
-
+        
         imgR = cv2.imread(full_path_filename_right, cv2.IMREAD_COLOR)
         imgR_height_cutoff = (3*np.size(imgR, 0))//4
         imgR = imgR[0:imgL_height_cutoff][:]
@@ -272,7 +258,11 @@ for filename_left in left_file_list:
         # TODO add other preprocessing: histogram equalisation, noise removal (bilateral filter, cv2 processing etc.)
 
         grayL = np.power(grayL, 0.75).astype('uint8');
+        grayL = cv2.equalizeHist(grayL)
+        grayL = cv2.bilateralFilter(grayL,11,50,50)
         grayR = np.power(grayR, 0.75).astype('uint8');
+        grayR = cv2.equalizeHist(grayR)
+        grayR = cv2.bilateralFilter(grayR,11,50,50)
 
         # compute disparity image from undistorted and rectified stereo images
         # that we have loaded
@@ -285,14 +275,20 @@ for filename_left in left_file_list:
         dispNoiseFilter = 5; # increase for more agressive filtering
         cv2.filterSpeckles(disparity, 0, 4000, max_disparity - dispNoiseFilter);
 
+
+        wls = cv2.ximgproc.createDisparityWLSFilter(stereoProcessor)
+        right = cv2.ximgproc.createRightMatcher(stereoProcessor)
+        right = right.compute(grayR, grayL)
+        disparity = wls.filter(disparity, grayL, None, right)
+        
         # scale the disparity to 8-bit for viewing
         # divide by 16 and convert to 8-bit image (then range of values should
         # be 0 -> max_disparity) but in fact is (-1 -> max_disparity - 1)
         # so we fix this also using a initial threshold between 0 and max_disparity
         # as disparity=-1 means no disparity available
-
-        _, disparity_thresholded = cv2.threshold(disparity,0, max_disparity * 16, cv2.THRESH_TOZERO);
-        disparity_scaled = (disparity_thresholded / 16.).astype(np.uint8);
+        
+        _, disparity = cv2.threshold(disparity,0, max_disparity * 16, cv2.THRESH_TOZERO);
+        disparity_scaled = (disparity / 16.).astype(np.uint8);
 
         # display image (scaling it to the full 0->255 range based on the number
         # of disparities in use for the stereo part)
@@ -307,7 +303,7 @@ for filename_left in left_file_list:
         # define display window name + trackbar
 
         windowName = 'YOLOv3 object detection: ' + weights_file
-        cv2.namedWindow(windowName, cv2.WINDOW_NORMAL)
+        cv2.namedWindow(windowName, cv2.WINDOW_AUTOSIZE)
 
         # start a timer (to see how long processing and display takes)
         start_t = cv2.getTickCount()
@@ -322,10 +318,10 @@ for filename_left in left_file_list:
         results = net.forward(output_layer_names)
 
         # remove the bounding boxes with low confidence using confidence threshold 0.5
-        classIDs, confidences, boxes = postprocess(imgL, results, 0.8, nmsThreshold)
+        classIDs, confidences, boxes = postprocess(imgL, results, 0.5, nmsThreshold)
 
         # draw resulting detections on image
-        for detected_object in range(0, len(boxes)):
+        for detected_object in range(len(boxes)):
             box = boxes[detected_object]
             left = box[0]
             top = box[1]
@@ -340,7 +336,7 @@ for filename_left in left_file_list:
 
         # display image
         cv2.imshow(windowName,imgL)
-
+        
         # stop the timer and convert to ms. (to see how long processing and display takes)
         stop_t = ((cv2.getTickCount() - start_t)/cv2.getTickFrequency()) * 1000
 
