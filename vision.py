@@ -22,15 +22,15 @@ def getBasicDistance(left, top, right, bottom):
     camera_focal_length_px = 399.9745178222656  # focal length in pixels
     stereo_camera_baseline_m = 0.2090607502     # camera baseline in metres
     
-    print(top, left, bottom, right)
+    #print(top, left, bottom, right)
     bounded_disparity = disparity_scaled[top:bottom,left:right]
+    #print("Max val is: ", np.argmax(bounded_disparity))
+    #_, bounded_disparity = cv2.threshold(bounded_disparity, 0, np.argmax(bounded_disparity), cv2.THRESH_TOZERO+cv2.THRESH_OTSU)
     if not (np.median(bounded_disparity) > 0):
         return -1
-    print("Normal disparity: ", np.shape(disparity_scaled))
-    print("Sliced disparity: ", np.shape(bounded_disparity))
+    #print("Normal disparity: ", np.shape(disparity_scaled))
+    #print("Sliced disparity: ", np.shape(bounded_disparity))
     return (camera_focal_length_px * stereo_camera_baseline_m) / np.median(bounded_disparity)
-
-
 
 #####################################################################
 # Draw the predicted bounding box on the specified image
@@ -39,11 +39,13 @@ def getBasicDistance(left, top, right, bottom):
 # left, top, right, bottom: rectangle parameters for detection
 # colour: to draw detection rectangle in
 
+useful_classes = ['person', 'car', 'bus', 'truck']
+
 def drawPred(image, class_name, confidence, left, top, right, bottom, colour):
     # Get distance value. If the distance isn't useful, do not draw this bounding box.
     distance = getBasicDistance(left, top, right, bottom)
     if distance <= 0: return
-
+    if class_name in useful_classes: colour = (34, 181, 44)
     # Draw a bounding box.x
     cv2.rectangle(image, (left, top), (right, bottom), colour, 3)
 
@@ -236,13 +238,11 @@ for filename_left in left_file_list:
         # RGB images so load both as such
 
         imgL = cv2.imread(full_path_filename_left, cv2.IMREAD_COLOR)
-        imgL_height_cutoff = (3*np.size(imgL, 0))//4
-        imgL = imgL[0:imgL_height_cutoff][:]
+        imgL = imgL[0:390,:]
         cv2.imshow('left image',imgL)
-        
+
         imgR = cv2.imread(full_path_filename_right, cv2.IMREAD_COLOR)
-        imgR_height_cutoff = (3*np.size(imgR, 0))//4
-        imgR = imgR[0:imgL_height_cutoff][:]
+        imgR = imgR[0:390,:]
         cv2.imshow('right image',imgR)
 
         print("-- files loaded successfully");
@@ -290,6 +290,8 @@ for filename_left in left_file_list:
         
         _, disparity = cv2.threshold(disparity,0, max_disparity * 16, cv2.THRESH_TOZERO);
         disparity_scaled = (disparity / 16.).astype(np.uint8);
+        width = np.size(disparity_scaled, 1)
+        disparity_scaled = disparity_scaled[:,135:width]
 
         # display image (scaling it to the full 0->255 range based on the number
         # of disparities in use for the stereo part)
@@ -300,6 +302,8 @@ for filename_left in left_file_list:
         #             Object Detection             #
         ############################################
 
+        width = np.size(imgL, 1)
+        imgL = imgL[:,135:width]
 
         # define display window name + trackbar
 
@@ -349,8 +353,6 @@ for filename_left in left_file_list:
         key = cv2.waitKey(40 * (not(pause_playback))) & 0xFF; # wait 40ms (i.e. 1000ms / 25 fps = 40 ms)
         if (key == ord('x')):       # exit
             break; # exit
-        elif (key == ord('c')):     # crop
-            crop_disparity = not(crop_disparity);
         elif (key == ord(' ')):     # pause (on next frame)
             pause_playback = not(pause_playback);
     else:
