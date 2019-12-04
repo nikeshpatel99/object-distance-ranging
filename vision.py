@@ -14,7 +14,24 @@ keep_processing = True
 def on_trackbar(val):
     return
 
-def getBasicDistance(left, top, right, bottom):
+
+def sparseStereo(grayL,grayR):
+    # initialise an ORB detector
+    orb = cv2.ORB_create()
+
+    # detect feature points and descriptors in left and right images
+    keyPointsL, descriptorsL = orb.detectAndCompute(grayL,None)
+    keyPointsR, descriptorsR = orb.detectAndCompute(grayR,None)
+
+    # initalise a brute force matcher that will match our descriptors together
+    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+
+    # match descriptors
+    matches = matcher.match(descriptorsL,descriptorsR)
+
+    print(matches)
+
+def getDistance(left, top, right, bottom):
     left = max(left,0)
     top = max(top,0)
     right = max(right,0)
@@ -22,14 +39,11 @@ def getBasicDistance(left, top, right, bottom):
     camera_focal_length_px = 399.9745178222656  # focal length in pixels
     stereo_camera_baseline_m = 0.2090607502     # camera baseline in metres
     
-    #print(top, left, bottom, right)
     bounded_disparity = disparity_scaled[top:bottom,left:right]
-    #print("Max val is: ", np.argmax(bounded_disparity))
-    #_, bounded_disparity = cv2.threshold(bounded_disparity, 0, np.argmax(bounded_disparity), cv2.THRESH_TOZERO+cv2.THRESH_OTSU)
+    _, bounded_disparity_otsu = cv2.threshold(bounded_disparity, 0, 1, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+    bounded_disparity = np.multiply(bounded_disparity, bounded_disparity_otsu)
     if not (np.median(bounded_disparity) > 0):
         return -1
-    #print("Normal disparity: ", np.shape(disparity_scaled))
-    #print("Sliced disparity: ", np.shape(bounded_disparity))
     return (camera_focal_length_px * stereo_camera_baseline_m) / np.median(bounded_disparity)
 
 #####################################################################
@@ -43,10 +57,17 @@ useful_classes = ['person', 'car', 'bus', 'truck']
 
 def drawPred(image, class_name, confidence, left, top, right, bottom, colour):
     # Get distance value. If the distance isn't useful, do not draw this bounding box.
-    distance = getBasicDistance(left, top, right, bottom)
+    distance = getDistance(left, top, right, bottom)
     if distance <= 0: return
     if class_name in useful_classes: colour = (34, 181, 44)
-    # Draw a bounding box.x
+##    if class_name == 'person':
+##        grayImg = cv2.cvtColor(image[top:bottom,left:right],cv2.COLOR_BGR2GRAY)
+##        contours, _ = cv2.findContours(grayImg, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_L1)
+##        coutours = contours[0]
+##        ellipse = cv2.fitEllipse(contours)
+##        cv2.ellipse(image, ellipse, colour, 2)
+##    else:
+    # Draw a bounding box
     cv2.rectangle(image, (left, top), (right, bottom), colour, 3)
 
     # construct label
@@ -251,53 +272,61 @@ for filename_left in left_file_list:
         # remember to convert to grayscale (as the disparity matching works on grayscale)
         # N.B. need to do for both as both are 3-channel images
 
-        grayL = cv2.cvtColor(imgL,cv2.COLOR_BGR2GRAY);
-        grayR = cv2.cvtColor(imgR,cv2.COLOR_BGR2GRAY);
+        grayL_unfiltered = cv2.cvtColor(imgL,cv2.COLOR_BGR2GRAY);
+        grayR_unfiltered = cv2.cvtColor(imgR,cv2.COLOR_BGR2GRAY);
 
         # perform preprocessing - raise to the power, as this subjectively appears
         # to improve subsequent disparity calculation
         # TODO add other preprocessing: histogram equalisation, noise removal (bilateral filter, cv2 processing etc.)
 
-        grayL = np.power(grayL, 0.75).astype('uint8');
+        grayL = np.power(grayL_unfiltered, 0.75).astype('uint8');
         grayL = cv2.bilateralFilter(grayL,11,50,50)
         grayL = cv2.equalizeHist(grayL)
-        grayR = np.power(grayR, 0.75).astype('uint8');
+        grayR = np.power(grayR_unfiltered, 0.75).astype('uint8');
         grayR = cv2.bilateralFilter(grayR,11,50,50)
         grayR = cv2.equalizeHist(grayR)
 
-        # compute disparity image from undistorted and rectified stereo images
-        # that we have loaded
-        # (which for reasons best known to the OpenCV developers is returned scaled by 16)
+        disparity_scaled = []
+        def denseStereo():
+            global disparity_scaled
+            # compute disparity image from undistorted and rectified stereo images
+            # that we have loaded
+            # (which for reasons best known to the OpenCV developers is returned scaled by 16)
 
-        disparity = stereoProcessor.compute(grayL,grayR);
+            disparity = stereoProcessor.compute(grayL,grayR);
 
-        # filter out noise and speckles (adjust parameters as needed)
+            # filter out noise and speckles (adjust parameters as needed)
 
-        dispNoiseFilter = 5; # increase for more agressive filtering
-        cv2.filterSpeckles(disparity, 0, 4000, max_disparity - dispNoiseFilter);
+            dispNoiseFilter = 5; # increase for more agressive filtering
+            cv2.filterSpeckles(disparity, 0, 4000, max_disparity - dispNoiseFilter);
 
 
-        wls = cv2.ximgproc.createDisparityWLSFilter(stereoProcessor)
-        right = cv2.ximgproc.createRightMatcher(stereoProcessor)
-        right = right.compute(grayR, grayL)
-        disparity = wls.filter(disparity, grayL, None, right)
+            wls = cv2.ximgproc.createDisparityWLSFilter(stereoProcessor)
+            right = cv2.ximgproc.createRightMatcher(stereoProcessor)
+            right = right.compute(grayR, grayL)
+            disparity = wls.filter(disparity, grayL, None, right)
+            
+            # scale the disparity to 8-bit for viewing
+            # divide by 16 and convert to 8-bit image (then range of values should
+            # be 0 -> max_disparity) but in fact is (-1 -> max_disparity - 1)
+            # so we fix this also using a initial threshold between 0 and max_disparity
+            # as disparity=-1 means no disparity available
+            
+            _, disparity = cv2.threshold(disparity,0, max_disparity * 16, cv2.THRESH_TOZERO);
+            disparity_scaled = (disparity / 16.).astype(np.uint8);
+            width = np.size(disparity_scaled, 1)
+            disparity_scaled = disparity_scaled[:,135:width]
+
+            # display image (scaling it to the full 0->255 range based on the number
+            # of disparities in use for the stereo part)
+
+            cv2.imshow("disparity", (disparity_scaled * (256. / max_disparity)).astype(np.uint8));
+
+        denseStereo()
+        print("Entering sparse test")
+        sparseStereo(grayL_unfiltered, grayR_unfiltered)
+
         
-        # scale the disparity to 8-bit for viewing
-        # divide by 16 and convert to 8-bit image (then range of values should
-        # be 0 -> max_disparity) but in fact is (-1 -> max_disparity - 1)
-        # so we fix this also using a initial threshold between 0 and max_disparity
-        # as disparity=-1 means no disparity available
-        
-        _, disparity = cv2.threshold(disparity,0, max_disparity * 16, cv2.THRESH_TOZERO);
-        disparity_scaled = (disparity / 16.).astype(np.uint8);
-        width = np.size(disparity_scaled, 1)
-        disparity_scaled = disparity_scaled[:,135:width]
-
-        # display image (scaling it to the full 0->255 range based on the number
-        # of disparities in use for the stereo part)
-
-        cv2.imshow("disparity", (disparity_scaled * (256. / max_disparity)).astype(np.uint8));
-
         ############################################
         #             Object Detection             #
         ############################################
