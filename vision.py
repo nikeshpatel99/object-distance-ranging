@@ -29,7 +29,7 @@ def sparseStereo(grayL,grayR):
     # match descriptors
     matches = matcher.match(descriptorsL,descriptorsR)
 
-    print(matches)
+    
 
 def getDistance(left, top, right, bottom):
     left = max(left,0)
@@ -39,12 +39,17 @@ def getDistance(left, top, right, bottom):
     camera_focal_length_px = 399.9745178222656  # focal length in pixels
     stereo_camera_baseline_m = 0.2090607502     # camera baseline in metres
     
-    bounded_disparity = disparity_scaled[top:bottom,left:right]
-    _, bounded_disparity_otsu = cv2.threshold(bounded_disparity, 0, 1, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-    bounded_disparity = np.multiply(bounded_disparity, bounded_disparity_otsu)
-    if not (np.median(bounded_disparity) > 0):
+    bounded_disparity = disparity_scaled[top:bottom,left:right].ravel()
+    bounded_disparity = bounded_disparity[bounded_disparity > 0]
+
+    if len(bounded_disparity) == 0:
         return -1
-    return (camera_focal_length_px * stereo_camera_baseline_m) / np.median(bounded_disparity)
+    
+    thresh, _ = cv2.threshold(bounded_disparity, 0, 1, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+    bounded_disparity = bounded_disparity[bounded_disparity > thresh]
+    if np.median(bounded_disparity) <= 0:
+        return -1
+    return (camera_focal_length_px * stereo_camera_baseline_m) / np.percentile(bounded_disparity,75)
 
 #####################################################################
 # Draw the predicted bounding box on the specified image
@@ -334,6 +339,15 @@ for filename_left in left_file_list:
         width = np.size(imgL, 1)
         imgL = imgL[:,135:width]
 
+        # image preprocessing to optimise YOLO
+        hsv_imgL = cv2.cvtColor(imgL,cv2.COLOR_BGR2HSV)
+        H, S, V = cv2.split(hsv_imgL)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        contrastCorrectedV = clahe.apply(V)
+        imgL_adjusted = cv2.merge((H,S,contrastCorrectedV))
+        imgL_adjusted = cv2.cvtColor(imgL_adjusted,cv2.COLOR_HSV2BGR)
+        
+
         # define display window name + trackbar
 
         windowName = 'YOLOv3 object detection: ' + weights_file
@@ -343,7 +357,7 @@ for filename_left in left_file_list:
         start_t = cv2.getTickCount()
 
         # create a 4D tensor (OpenCV 'blob') from image frame (pixels scaled 0->1, image resized)
-        tensor = cv2.dnn.blobFromImage(imgL, 1/255, (inpWidth, inpHeight), [0,0,0], 1, crop=False)
+        tensor = cv2.dnn.blobFromImage(imgL_adjusted, 1/255, (inpWidth, inpHeight), [0,0,0], 1, crop=False)
 
         # set the input to the CNN network
         net.setInput(tensor)
@@ -352,7 +366,7 @@ for filename_left in left_file_list:
         results = net.forward(output_layer_names)
 
         # remove the bounding boxes with low confidence using confidence threshold 0.5
-        classIDs, confidences, boxes = postprocess(imgL, results, 0.5, nmsThreshold)
+        classIDs, confidences, boxes = postprocess(imgL_adjusted, results, 0.5, nmsThreshold)
 
         # draw resulting detections on image
         for detected_object in range(len(boxes)):
