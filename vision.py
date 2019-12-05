@@ -17,7 +17,7 @@ def on_trackbar(val):
 
 def sparseStereo(grayL,grayR):
     # initialise an ORB detector
-    orb = cv2.ORB_create()
+    orb = cv2.ORB_create(5000)
 
     # detect feature points and descriptors in left and right images
     keyPointsL, descriptorsL = orb.detectAndCompute(grayL,None)
@@ -28,16 +28,22 @@ def sparseStereo(grayL,grayR):
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
 
     # match descriptors
-    matches = matcher.match(descriptorsL,descriptorsR)
+##    matches = matcher.match(descriptorsL,descriptorsR)
+    matches = matcher.knnMatch(descriptorsR, trainDescriptors = descriptorsL, k = 2)
+
+    goodMatches = []
+    for m, n in matches:
+        if m.distance < 0.7 * n.distance:
+            goodMatches.append(m)
 
     sparseDisparity = {}
     # calculate and store disparity for each feature point
-    for match in matches:
+    for match in goodMatches:
         keyPointIndexL = match.trainIdx
         keyPointIndexR = match.queryIdx
         keyPointLCoords = keyPointsL[keyPointIndexL].pt
         keyPointRCoords = keyPointsR[keyPointIndexR].pt
-        sparseDisparity[(int(keyPointLCoords[0]),int(keyPointLCoords[1]))] = abs(keyPointLCoords[1] - keyPointRCoords[1])
+        sparseDisparity[(int(keyPointLCoords[1]),int(keyPointLCoords[0]))] = ((keyPointLCoords[0]-keyPointRCoords[0])**2  + (keyPointLCoords[1]-keyPointRCoords[1])**2)**0.5
 
     featurePointImg = cv2.drawKeypoints(grayL,keyPointsL,None,flags=2)
     cv2.imshow('featurePointImg',featurePointImg)
@@ -51,8 +57,8 @@ def getSparseDistance(left, top,right,bottom):
     points = []
     for i in range(top,bottom):
         for j in range(left,right):
-            disparity = sparseDisparity.get((i,j),-1)
-            if disparity == -1:
+            disparity = sparseDisparity.get((i,j),0)
+            if disparity == 0:
                 continue
             points.append(disparity)
             #sumOfDisparity += disparity
@@ -63,7 +69,7 @@ def getSparseDistance(left, top,right,bottom):
     print(np.median(np.array(points)))
     if np.median(np.array(points)) < 0:
         return -1
-    return (camera_focal_length_px * stereo_camera_baseline_m) / np.median(np.array(points))
+    return (camera_focal_length_px * stereo_camera_baseline_m) / np.nanmedian(np.array(points))
 
 def getDistance(left, top, right, bottom):
     left = max(left,0)
@@ -101,8 +107,9 @@ def drawPred(image, class_name, confidence, left, top, right, bottom, colour):
         distance = getSparseDistance(left, top, right, bottom)
     else:
         distance = getDistance(left, top, right, bottom)
-    if distance <= 0: return
+    if not distance > 0: return
     if class_name in useful_classes: colour = (34, 181, 44)
+    else: return
 ##    if class_name == 'person':
 ##        grayImg = cv2.cvtColor(image[top:bottom,left:right],cv2.COLOR_BGR2GRAY)
 ##        contours, _ = cv2.findContours(grayImg, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_L1)
