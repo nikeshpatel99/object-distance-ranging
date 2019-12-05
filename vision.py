@@ -23,13 +23,47 @@ def sparseStereo(grayL,grayR):
     keyPointsL, descriptorsL = orb.detectAndCompute(grayL,None)
     keyPointsR, descriptorsR = orb.detectAndCompute(grayR,None)
 
+    
     # initalise a brute force matcher that will match our descriptors together
-    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
 
     # match descriptors
     matches = matcher.match(descriptorsL,descriptorsR)
 
-    
+    sparseDisparity = {}
+    # calculate and store disparity for each feature point
+    for match in matches:
+        keyPointIndexL = match.trainIdx
+        keyPointIndexR = match.queryIdx
+        keyPointLCoords = keyPointsL[keyPointIndexL].pt
+        keyPointRCoords = keyPointsR[keyPointIndexR].pt
+        sparseDisparity[(int(keyPointLCoords[0]),int(keyPointLCoords[1]))] = abs(keyPointLCoords[1] - keyPointRCoords[1])
+
+    featurePointImg = cv2.drawKeypoints(grayL,keyPointsL,None,flags=2)
+    cv2.imshow('featurePointImg',featurePointImg)
+    return sparseDisparity
+
+def getSparseDistance(left, top,right,bottom):
+    camera_focal_length_px = 399.9745178222656  # focal length in pixels
+    stereo_camera_baseline_m = 0.2090607502     # camera baseline in metres
+    #sumOfDisparity = 0
+    #numOfFeaturePoints = 0
+    points = []
+    for i in range(top,bottom):
+        for j in range(left,right):
+            disparity = sparseDisparity.get((i,j),-1)
+            if disparity == -1:
+                continue
+            points.append(disparity)
+            #sumOfDisparity += disparity
+            #numOfFeaturePoints += 1
+    #if numOfFeaturePoints == 0:
+    #    return -1
+    #disparityValue = sumOfDisparity / numOfFeaturePoints
+    print(np.median(np.array(points)))
+    if np.median(np.array(points)) < 0:
+        return -1
+    return (camera_focal_length_px * stereo_camera_baseline_m) / np.median(np.array(points))
 
 def getDistance(left, top, right, bottom):
     left = max(left,0)
@@ -49,6 +83,7 @@ def getDistance(left, top, right, bottom):
     bounded_disparity = bounded_disparity[bounded_disparity > thresh]
     if np.median(bounded_disparity) <= 0:
         return -1
+    print(np.percentile(bounded_disparity,75))
     return (camera_focal_length_px * stereo_camera_baseline_m) / np.percentile(bounded_disparity,75)
 
 #####################################################################
@@ -62,7 +97,10 @@ useful_classes = ['person', 'car', 'bus', 'truck']
 
 def drawPred(image, class_name, confidence, left, top, right, bottom, colour):
     # Get distance value. If the distance isn't useful, do not draw this bounding box.
-    distance = getDistance(left, top, right, bottom)
+    if sparse:
+        distance = getSparseDistance(left, top, right, bottom)
+    else:
+        distance = getDistance(left, top, right, bottom)
     if distance <= 0: return
     if class_name in useful_classes: colour = (34, 181, 44)
 ##    if class_name == 'person':
@@ -228,7 +266,7 @@ left_file_list = sorted(os.listdir(full_path_directory_left));
 
 max_disparity = 128;
 stereoProcessor = cv2.StereoSGBM_create(0, max_disparity, 21);
-
+sparse = True
 for filename_left in left_file_list:
 
     # skip forward to start a file we specify by timestamp (if this is set)
@@ -327,10 +365,9 @@ for filename_left in left_file_list:
 
             cv2.imshow("disparity", (disparity_scaled * (256. / max_disparity)).astype(np.uint8));
 
-        denseStereo()
+        #denseStereo()
         print("Entering sparse test")
-        sparseStereo(grayL_unfiltered, grayR_unfiltered)
-
+        sparseDisparity = sparseStereo(grayL_unfiltered, grayR_unfiltered)
         
         ############################################
         #             Object Detection             #
@@ -340,10 +377,14 @@ for filename_left in left_file_list:
         imgL = imgL[:,135:width]
 
         # image preprocessing to optimise YOLO
+        # convert image to HSV colour space in order to access luminence channel V
         hsv_imgL = cv2.cvtColor(imgL,cv2.COLOR_BGR2HSV)
+        # split channels
         H, S, V = cv2.split(hsv_imgL)
+        # create a Contrast Limited Adaptive Histogram Equalization instance and apply to our input image
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
         contrastCorrectedV = clahe.apply(V)
+        # merge channels back together and convert image back to a BGR format
         imgL_adjusted = cv2.merge((H,S,contrastCorrectedV))
         imgL_adjusted = cv2.cvtColor(imgL_adjusted,cv2.COLOR_HSV2BGR)
         
