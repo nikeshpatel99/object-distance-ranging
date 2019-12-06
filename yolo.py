@@ -4,6 +4,8 @@ import math
 from sparse_stereo import getSparseDistance 
 from dense_stereo import getDenseDistance
 
+# contains elements from yolo.py by Toby Breckon
+
 # init YOLO CNN object detection model
 
 confThreshold = 0.5  # Confidence threshold
@@ -26,7 +28,7 @@ classesFile = 'coco.names'
 # left, top, right, bottom: rectangle parameters for detection
 # colour: to draw detection rectangle in
 
-useful_classes = ['person', 'car', 'bus', 'truck']
+useful_classes = ['person', 'car', 'bus', 'truck', 'motorbike', 'train', 'bicycle']
 
 def drawPred(image, class_name, confidence, left, top, right, bottom, colour, disparityMap, sparse):
     # Get distance value. If the distance isn't useful, do not draw this bounding box.
@@ -34,9 +36,9 @@ def drawPred(image, class_name, confidence, left, top, right, bottom, colour, di
         distance = getSparseDistance(left, top, right, bottom, disparityMap)
     else:
         distance = getDenseDistance(left, top, right, bottom, disparityMap)
-    if not distance > 0: return
+    if not distance > 0: return 99999
     if class_name in useful_classes: colour = (34, 181, 44)
-    else: return
+    else: return 99999
     
     # Draw a bounding box
     cv2.rectangle(image, (left, top), (right, bottom), colour, 3)
@@ -50,6 +52,7 @@ def drawPred(image, class_name, confidence, left, top, right, bottom, colour, di
     cv2.rectangle(image, (left, top - round(1.5*labelSize[1])),
         (left + round(1.5*labelSize[0]), top + baseLine), (255, 255, 255), cv2.FILLED)
     cv2.putText(image, label, (left, top), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0,0,0), 1)
+    return distance
 
 #####################################################################
 # Remove the bounding boxes with low confidence using non-maxima suppression
@@ -134,9 +137,6 @@ def initialise():
     return net, output_layer_names, classes
 
 def run(net, output_layer_names, classes, imgL, imgL_adjusted, disparity_map, sparse):
-    # start a timer (to see how long processing and display takes)
-    start_t = cv2.getTickCount()
-
     # create a 4D tensor (OpenCV 'blob') from image frame (pixels scaled 0->1, image resized)
     tensor = cv2.dnn.blobFromImage(imgL_adjusted, 1/255, (inpWidth, inpHeight), [0,0,0], 1, crop=False)
 
@@ -150,22 +150,19 @@ def run(net, output_layer_names, classes, imgL, imgL_adjusted, disparity_map, sp
     classIDs, confidences, boxes = postprocess(imgL_adjusted, results, 0.5, nmsThreshold)
 
     # draw resulting detections on image
+    minDistance = 99999
     for detected_object in range(len(boxes)):
         box = boxes[detected_object]
         left = box[0]
         top = box[1]
         width = box[2]
         height = box[3]
-        drawPred(imgL, classes[classIDs[detected_object]], confidences[detected_object], left, top, left + width, top + height, (255, 178, 50), disparity_map, sparse)
-        
-    # Put efficiency information. The function getPerfProfile returns the overall time for inference(t) and the timings for each of the layers(in layersTimes)
-    t, _ = net.getPerfProfile()
-    label = 'Inference time: %.2f ms' % (t * 1000.0 / cv2.getTickFrequency())
-    cv2.putText(imgL, label, (0, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255))
+        distance = drawPred(imgL, classes[classIDs[detected_object]], confidences[detected_object], left, top, left + width, top + height, (255, 178, 50), disparity_map, sparse)
+        minDistance = min(distance,minDistance)
 
-    # stop the timer and convert to ms. (to see how long processing and display takes)
-    stop_t = ((cv2.getTickCount() - start_t)/cv2.getTickFrequency()) * 1000
+    if minDistance == 99999:
+        minDistance = 0
 
-    return imgL
+    return imgL, minDistance
 
 

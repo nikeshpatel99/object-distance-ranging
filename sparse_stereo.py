@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 
+# contains elements of surf_detection.py by Toby Breckon
+
 # calculates the distance of an object within a bounding box using sparse disparity methods
 # left, top, right, bottom: the location of the corners of the bounding box
 # sparseDisparity: dictionary of sparse disparity values index by y,x location in the left image
@@ -17,15 +19,17 @@ def getSparseDistance(left, top, right, bottom, sparseDisparity):
             points.append(disparity) # if the keypoint exists and is useful - append to our array of useful points
     # convert to numpy filestructure to facilitate numpy operations
     points = np.array(points)
+    # filter out 0 values, they have no use in our disparity calculation
+    points = points[points > 0]
     # if the median is <= 0, the distance calculation will incorrect, so we return out with an error value
-    if np.median(points) <= 0:
+    if np.nanmedian(points) <= 0:
         return -1
     # return the distance
     return (camera_focal_length_px * stereo_camera_baseline_m) / np.nanmedian(points)
 
 def sparseStereo(grayL,grayR):
     # initialise an ORB detector
-    orb = cv2.ORB_create(5000)
+    orb = cv2.ORB_create(2000)
 
     # detect feature points and descriptors in left and right images
     keyPointsL, descriptorsL = orb.detectAndCompute(grayL,None)
@@ -55,6 +59,4 @@ def sparseStereo(grayL,grayR):
         # calculate the disparity value of the keypoint and store it in a dictionary indexed by the location of the keypoint in the left image
         sparseDisparity[(int(keyPointLCoords[1]),int(keyPointLCoords[0]))] = ((keyPointLCoords[0]-keyPointRCoords[0])**2  + (keyPointLCoords[1]-keyPointRCoords[1])**2)**0.5
 
-#    featurePointImg = cv2.drawKeypoints(grayL,keyPointsL,None,flags=2)
-#    cv2.imshow('featurePointImg',featurePointImg)
     return sparseDisparity

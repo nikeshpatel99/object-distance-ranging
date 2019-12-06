@@ -9,6 +9,7 @@ from dense_stereo import denseStereo
 import yolo
 
 keep_processing = True
+
 # if you want to use sparse stereo, set to True, for dense set to False
 sparse = False
 
@@ -43,7 +44,9 @@ cv2.namedWindow(windowName, cv2.WINDOW_AUTOSIZE)
 net, output_layer_names, classes = yolo.initialise()
 
 for filename_left in left_file_list:
-
+    # start a timer (to see how long processing and display takes)
+    start_t = cv2.getTickCount()
+    
     # skip forward to start a file we specify by timestamp (if this is set)
 
     if ((len(skip_forward_file_pattern) > 0) and not(skip_forward_file_pattern in filename_left)):
@@ -57,12 +60,6 @@ for filename_left in left_file_list:
     full_path_filename_left = os.path.join(full_path_directory_left, filename_left);
     full_path_filename_right = os.path.join(full_path_directory_right, filename_right);
 
-    # for sanity print out these filenames
-
-    print(full_path_filename_left);
-    print(full_path_filename_right);
-    print();
-
     # check the file is a PNG file (left) and check a correspondoning right image
     # actually exists
 
@@ -74,11 +71,11 @@ for filename_left in left_file_list:
 
         imgL = cv2.imread(full_path_filename_left, cv2.IMREAD_COLOR)
         imgL = imgL[0:390,:]
-        cv2.imshow('left image',imgL)
+        #cv2.imshow('left image',imgL)
 
         imgR = cv2.imread(full_path_filename_right, cv2.IMREAD_COLOR)
         imgR = imgR[0:390,:]
-        cv2.imshow('right image',imgR)
+        #cv2.imshow('right image',imgR)
 
         print("-- files loaded successfully");
         print();
@@ -88,17 +85,14 @@ for filename_left in left_file_list:
 
         grayL_unfiltered = cv2.cvtColor(imgL,cv2.COLOR_BGR2GRAY);
         grayR_unfiltered = cv2.cvtColor(imgR,cv2.COLOR_BGR2GRAY);
-
+        
         # perform preprocessing - raise to the power, as this subjectively appears
         # to improve subsequent disparity calculation
-        # we also perform a bilateral filter to smooth the images
         # and we equalise the image histograms to aim with the brightness in the image
 
         grayL = np.power(grayL_unfiltered, 0.75).astype('uint8');
-        grayL = cv2.bilateralFilter(grayL,11,50,50)
         grayL = cv2.equalizeHist(grayL)
         grayR = np.power(grayR_unfiltered, 0.75).astype('uint8');
-        grayR = cv2.bilateralFilter(grayR,11,50,50)
         grayR = cv2.equalizeHist(grayR)
 
         # calculate the disparity map dependent on the method selected
@@ -123,12 +117,25 @@ for filename_left in left_file_list:
         imgL_adjusted = cv2.cvtColor(imgL_adjusted,cv2.COLOR_HSV2BGR)
 
         # run YOLO object detection on the image
-        imgL = yolo.run(net, output_layer_names, classes, imgL, imgL_adjusted, disparity_map, sparse)
+        imgL, closest_distance = yolo.run(net, output_layer_names, classes, imgL, imgL_adjusted, disparity_map, sparse)
+
+        # Put efficiency information. The function getPerfProfile returns the overall time for inference(t) and the timings for each of the layers(in layersTimes)
+        t, _ = net.getPerfProfile()
+        label = 'Inference time: %.2f ms' % (t * 1000.0 / cv2.getTickFrequency())
+        cv2.putText(imgL, label, (0, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255))
+
+        # stop the timer and convert to ms. (to see how long processing and display takes)
+        stop_t = ((cv2.getTickCount() - start_t)/cv2.getTickFrequency()) * 1000
+
+        # output filenames and closest distance info
+        print(filename_left);
+        print("%s : nearest detected scene object (%.2fm)"%(filename_right,closest_distance))
+        print()
         
         # display image
         cv2.imshow(windowName,imgL)
         
-        # keyboard input for exit (as standard), save disparity and cropping
+        # keyboard input for exit (as standard), and pause
         # exit - x
         # pause - space
 
@@ -137,6 +144,7 @@ for filename_left in left_file_list:
             break; # exit
         elif (key == ord(' ')):     # pause (on next frame)
             pause_playback = not(pause_playback);
+
     else:
             print("-- files skipped (perhaps one is missing or not PNG)")
             print()

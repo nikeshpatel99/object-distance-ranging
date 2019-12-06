@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 
+# Contains elements of stereo_disparity.py by Toby Breckon
+
 max_disparity = 128
 
 # create a dense stereo disparity map from a pair of greyscale images
